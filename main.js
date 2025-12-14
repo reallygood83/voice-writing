@@ -62,7 +62,9 @@ var ERROR_MESSAGES = {
   MICROPHONE_PERMISSION_DENIED: "Microphone access denied. Please allow microphone access in your browser/system settings.",
   MICROPHONE_NOT_FOUND: "No microphone found. Please connect a microphone and try again.",
   MICROPHONE_GENERAL_ERROR: "Failed to access microphone. Please check your audio settings.",
-  NO_ACTIVE_RECORDING: "No active recording to stop."
+  NO_ACTIVE_RECORDING: "No active recording to stop.",
+  API_UNAUTHORIZED: "Incorrect API Key (401). Please check your settings.",
+  API_QUOTA_EXCEEDED: "API Quota Exceeded (429). Please check your plan."
 };
 var SUCCESS_MESSAGES = {
   RECORDING_STARTED: "\u{1F399}\uFE0F Recording started...",
@@ -187,10 +189,14 @@ var TranscriptionService = class {
         timeoutPromise
       ]);
       if (response.status !== 200) {
-        const errorDetails = this.parseErrorResponse(response);
-        console.error("Transcription failed:", errorDetails);
-        new import_obsidian.Notice(`\u274C Transcription failed: ${errorDetails.message}`);
-        throw new Error(`Transcription failed: ${response.status} - ${errorDetails.message}`);
+        console.error("Transcription failed:", response.json);
+        if (response.status === 401) {
+          throw new Error("API_UNAUTHORIZED");
+        }
+        if (response.status === 429) {
+          throw new Error("API_QUOTA_EXCEEDED");
+        }
+        throw new Error(`Transcription failed: ${response.status}`);
       }
       return { text: response.json.text };
     } catch (error) {
@@ -274,6 +280,47 @@ var TranscriptionService = class {
 
 // src/modals.ts
 var import_obsidian2 = require("obsidian");
+var RecordingModal = class extends import_obsidian2.Modal {
+  constructor(app, onStop) {
+    super(app);
+    this.onStop = onStop;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("voice-writing-recording-modal");
+    const container = contentEl.createDiv({ cls: "recording-container" });
+    const iconWrapper = container.createDiv({ cls: "recording-icon-wrapper" });
+    iconWrapper.createDiv({ cls: "recording-pulse-ring" });
+    iconWrapper.createEl("span", { text: "\u{1F399}\uFE0F", cls: "recording-icon" });
+    container.createEl("h2", { text: "Recording in Progress..." });
+    this.timerEl = container.createDiv({ cls: "recording-timer", text: "00:00" });
+    this.startTime = Date.now();
+    this.timerInterval = window.setInterval(() => this.updateTimer(), 1e3);
+    const btnContainer = container.createDiv({ cls: "recording-controls" });
+    const stopBtn = btnContainer.createEl("button", {
+      text: "Stop Recording",
+      cls: "mod-cta stop-recording-btn"
+    });
+    stopBtn.onclick = () => {
+      this.onStop();
+      this.close();
+    };
+  }
+  updateTimer() {
+    if (!this.timerEl)
+      return;
+    const diff = Math.floor((Date.now() - this.startTime) / 1e3);
+    const mins = Math.floor(diff / 60).toString().padStart(2, "0");
+    const secs = (diff % 60).toString().padStart(2, "0");
+    this.timerEl.setText(`${mins}:${secs}`);
+  }
+  onClose() {
+    if (this.timerInterval)
+      clearInterval(this.timerInterval);
+    this.contentEl.empty();
+  }
+};
 var ProcessingModal = class extends import_obsidian2.Modal {
   constructor(app) {
     super(app);
@@ -282,11 +329,13 @@ var ProcessingModal = class extends import_obsidian2.Modal {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("voice-writing-processing-modal");
-    contentEl.createEl("h2", { text: "\u2728 Processing Audio..." });
-    const spinner = contentEl.createDiv({ cls: "voice-writing-spinner" });
+    const container = contentEl.createDiv({ cls: "processing-container" });
+    const spinner = container.createDiv({ cls: "voice-writing-spinner" });
     spinner.createDiv({ cls: "double-bounce1" });
     spinner.createDiv({ cls: "double-bounce2" });
-    contentEl.createEl("p", { text: "Transcribing your voice..." });
+    container.createEl("h2", { text: "\u2728 Transcribing..." });
+    container.createEl("p", { text: "Sending audio to AI for text conversion." });
+    container.createEl("small", { text: "This usually takes a few seconds.", cls: "processing-hint" });
   }
   onClose() {
     const { contentEl } = this;
@@ -334,6 +383,10 @@ var DEFAULT_SETTINGS = {
   serviceProvider: "openai"
 };
 var VoiceWritingPlugin = class extends import_obsidian3.Plugin {
+  constructor() {
+    super(...arguments);
+    this.recordingModal = null;
+  }
   async onload() {
     await this.loadSettings();
     this.recorder = new MicrophoneRecorder();
@@ -384,9 +437,13 @@ var VoiceWritingPlugin = class extends import_obsidian3.Plugin {
       new import_obsidian3.Notice(SUCCESS_MESSAGES.RECORDING_STARTED);
       this.ribbonIconEl.addClass("voice-writing-recording");
       this.updateStatusBar("Recording...");
+      this.recordingModal = new RecordingModal(this.app, () => {
+        this.stopRecording();
+      });
+      this.recordingModal.open();
     } catch (error) {
       const recordingError = error;
-      if (recordingError.type) {
+      if (recordingError && recordingError.type) {
         new import_obsidian3.Notice(recordingError.message);
       } else {
         new import_obsidian3.Notice(ERROR_MESSAGES.MICROPHONE_GENERAL_ERROR);
@@ -395,6 +452,10 @@ var VoiceWritingPlugin = class extends import_obsidian3.Plugin {
     }
   }
   async stopRecording() {
+    if (this.recordingModal) {
+      this.recordingModal.close();
+      this.recordingModal = null;
+    }
     try {
       const blob = await this.recorder.stopRecording();
       this.ribbonIconEl.removeClass("voice-writing-recording");
@@ -426,11 +487,18 @@ ${result.text}
           new import_obsidian3.Notice(SUCCESS_MESSAGES.COPIED_TO_CLIPBOARD);
           navigator.clipboard.writeText(result.text);
         }
-      } catch (transcriptionError) {
+      } catch (error) {
         processingModal.close();
-        new import_obsidian3.Notice("\u274C Transcription failed. Audio saved.");
-        console.error(transcriptionError);
+        console.error(error);
         this.updateStatusBar("Error");
+        const errMsg = error.message;
+        if (errMsg === "API_UNAUTHORIZED") {
+          new import_obsidian3.Notice(ERROR_MESSAGES.API_UNAUTHORIZED, 5e3);
+        } else if (errMsg === "API_QUOTA_EXCEEDED") {
+          new import_obsidian3.Notice(ERROR_MESSAGES.API_QUOTA_EXCEEDED, 5e3);
+        } else {
+          new import_obsidian3.Notice("\u274C Transcription failed. Audio saved locally.");
+        }
         const activeView = this.app.workspace.getActiveViewOfType(import_obsidian3.MarkdownView);
         if (activeView) {
           activeView.editor.replaceSelection(`![[${fileName}]]
@@ -438,8 +506,8 @@ ${result.text}
         }
       }
     } catch (error) {
-      new import_obsidian3.Notice("Failed to stop recording: " + error);
-      this.updateStatusBar("Error");
+      this.ribbonIconEl.removeClass("voice-writing-recording");
+      this.updateStatusBar("Idle");
     }
   }
   updateStatusBar(text) {
@@ -477,9 +545,20 @@ var VoiceWritingSettingTab = class extends import_obsidian3.PluginSettingTab {
       this.plugin.settings.apiKey = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Default Language").setDesc('Language code for transcription (e.g., en, ko, ja). Use "auto" for auto-detection.').addText((text) => text.setPlaceholder("auto").setValue(this.plugin.settings.language).onChange(async (value) => {
-      this.plugin.settings.language = value;
-      await this.plugin.saveSettings();
-    }));
+    new import_obsidian3.Setting(containerEl).setName("Default Language").setDesc('Language code for transcription (e.g., en, ko, ja). Use "auto" for auto-detection.').addDropdown((drop) => {
+      const langs = [
+        { code: "auto", name: "Auto Detect" },
+        { code: "en", name: "English" },
+        { code: "ko", name: "Korean" },
+        { code: "ja", name: "Japanese" }
+      ];
+      langs.forEach((lang) => {
+        drop.addOption(lang.code, lang.name);
+      });
+      drop.setValue(this.plugin.settings.language).onChange(async (value) => {
+        this.plugin.settings.language = value;
+        await this.plugin.saveSettings();
+      });
+    });
   }
 };
