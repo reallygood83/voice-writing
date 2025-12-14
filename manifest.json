@@ -1,7 +1,7 @@
 {
 	"id": "voice-writing",
 	"name": "Voice Writing",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"minAppVersion": "0.15.0",
 	"description": "Simple voice recording and transcription for Obsidian.",
 	"author": "Obsidian Voice Writing",

@@ -1,3 +1,11 @@
+import { ERROR_MESSAGES } from './constants';
+
+export interface RecordingError {
+    type: 'permission_denied' | 'not_found' | 'general';
+    message: string;
+    originalError?: Error;
+}
+
 export class MicrophoneRecorder {
     private mediaRecorder: MediaRecorder | null = null;
     private audioChunks: Blob[] = [];
@@ -18,14 +26,14 @@ export class MicrophoneRecorder {
             this.mediaRecorder.start();
         } catch (error) {
             console.error("Error starting recording:", error);
-            throw error;
+            throw this.parseMediaError(error);
         }
     }
 
     async stopRecording(): Promise<Blob> {
         return new Promise((resolve, reject) => {
             if (!this.mediaRecorder) {
-                reject(new Error("No active recording"));
+                reject(new Error(ERROR_MESSAGES.NO_ACTIVE_RECORDING));
                 return;
             }
 
@@ -44,5 +52,41 @@ export class MicrophoneRecorder {
 
     isRecording(): boolean {
         return this.mediaRecorder?.state === "recording";
+    }
+
+    /**
+     * Parse media device errors and provide user-friendly messages
+     */
+    private parseMediaError(error: unknown): RecordingError {
+        if (error instanceof DOMException) {
+            switch (error.name) {
+                case 'NotAllowedError':
+                case 'PermissionDeniedError':
+                    return {
+                        type: 'permission_denied',
+                        message: ERROR_MESSAGES.MICROPHONE_PERMISSION_DENIED,
+                        originalError: error
+                    };
+                case 'NotFoundError':
+                case 'DevicesNotFoundError':
+                    return {
+                        type: 'not_found',
+                        message: ERROR_MESSAGES.MICROPHONE_NOT_FOUND,
+                        originalError: error
+                    };
+                default:
+                    return {
+                        type: 'general',
+                        message: ERROR_MESSAGES.MICROPHONE_GENERAL_ERROR,
+                        originalError: error
+                    };
+            }
+        }
+
+        return {
+            type: 'general',
+            message: ERROR_MESSAGES.MICROPHONE_GENERAL_ERROR,
+            originalError: error instanceof Error ? error : new Error(String(error))
+        };
     }
 }

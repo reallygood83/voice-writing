@@ -1,4 +1,5 @@
 import { App, Modal, Setting } from 'obsidian';
+import { ServiceProvider, SUPPORTED_LANGUAGES } from './constants';
 
 export class ProcessingModal extends Modal {
     constructor(app: App) {
@@ -26,11 +27,11 @@ export class ProcessingModal extends Modal {
 }
 
 export class QuickOptionModal extends Modal {
-    onSelect: (language: string, service: 'openai' | 'groq') => void;
+    onSelect: (language: string, service: ServiceProvider) => void;
     currentLanguage: string;
-    currentService: 'openai' | 'groq';
+    currentService: ServiceProvider;
 
-    constructor(app: App, currentLanguage: string, currentService: 'openai' | 'groq', onSelect: (l: string, s: 'openai' | 'groq') => void) {
+    constructor(app: App, currentLanguage: string, currentService: ServiceProvider, onSelect: (l: string, s: ServiceProvider) => void) {
         super(app);
         this.currentLanguage = currentLanguage;
         this.currentService = currentService;
@@ -48,14 +49,13 @@ export class QuickOptionModal extends Modal {
         new Setting(contentEl)
             .setName('Language')
             .setDesc('Select audio language')
-            .addDropdown(drop => drop
-                .addOption('auto', 'Auto Detect')
-                .addOption('en', 'English')
-                .addOption('ko', 'Korean')
-                .addOption('ja', 'Japanese')
-                .setValue(tempLanguage)
-                .onChange(value => tempLanguage = value)
-            );
+            .addDropdown(drop => {
+                SUPPORTED_LANGUAGES.forEach(lang => {
+                    drop.addOption(lang.code, lang.name);
+                });
+                drop.setValue(tempLanguage)
+                    .onChange(value => tempLanguage = value);
+            });
 
         new Setting(contentEl)
             .setName('Service')
@@ -64,7 +64,7 @@ export class QuickOptionModal extends Modal {
                 .addOption('openai', 'OpenAI Whisper')
                 .addOption('groq', 'Groq (Fast)')
                 .setValue(tempService)
-                .onChange(value => tempService = value as 'openai' | 'groq')
+                .onChange(value => tempService = value as ServiceProvider)
             );
 
         new Setting(contentEl)

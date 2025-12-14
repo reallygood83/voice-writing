@@ -1,12 +1,13 @@
 import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, requestUrl } from 'obsidian';
-import { MicrophoneRecorder } from './src/recorder';
+import { MicrophoneRecorder, RecordingError } from './src/recorder';
 import { TranscriptionService } from './src/transcription';
 import { ProcessingModal, QuickOptionModal } from './src/modals';
+import { ServiceProvider, SUCCESS_MESSAGES, ERROR_MESSAGES } from './src/constants';
 
 interface VoiceWritingSettings {
 	apiKey: string;
 	language: string;
-	serviceProvider: 'openai' | 'groq';
+	serviceProvider: ServiceProvider;
 }
 
 const DEFAULT_SETTINGS: VoiceWritingSettings = {
@@ -62,7 +63,7 @@ export default class VoiceWritingPlugin extends Plugin {
 					this.settings.language = lang;
 					this.settings.serviceProvider = service;
 					await this.saveSettings();
-					new Notice(`Settings saved: ${service} / ${lang}`);
+					new Notice(SUCCESS_MESSAGES.SETTINGS_SAVED(service, lang));
 				}).open();
 			}
 		});
@@ -81,11 +82,17 @@ export default class VoiceWritingPlugin extends Plugin {
 	async startRecording() {
 		try {
 			await this.recorder.startRecording();
-			new Notice('🎙️ Recording started...');
+			new Notice(SUCCESS_MESSAGES.RECORDING_STARTED);
 			this.ribbonIconEl.addClass('voice-writing-recording');
 			this.updateStatusBar('Recording...');
 		} catch (error) {
-			new Notice('Failed to start recording: ' + error);
+			const recordingError = error as RecordingError;
+			if (recordingError.type) {
+				new Notice(recordingError.message);
+			} else {
+				new Notice(ERROR_MESSAGES.MICROPHONE_GENERAL_ERROR);
+			}
+			console.error('Recording error:', error);
 		}
 	}
 
@@ -114,7 +121,7 @@ export default class VoiceWritingPlugin extends Plugin {
 				);
 
 				processingModal.close();
-				new Notice('✅ Transcription complete!');
+				new Notice(SUCCESS_MESSAGES.TRANSCRIPTION_COMPLETE);
 				this.updateStatusBar('Idle');
 
 				// 3. Insert into Editor
@@ -124,9 +131,8 @@ export default class VoiceWritingPlugin extends Plugin {
 					const template = `![[${fileName}]]\n\n${result.text}\n`;
 					editor.replaceSelection(template);
 				} else {
-					// Need to determine how to append if no active editor features?
-					// For now, simpler to just notify.
-					new Notice('Text copied to clipboard (No active editor)');
+					// No active editor - copy to clipboard
+					new Notice(SUCCESS_MESSAGES.COPIED_TO_CLIPBOARD);
 					navigator.clipboard.writeText(result.text);
 				}
 
@@ -193,7 +199,7 @@ class VoiceWritingSettingTab extends PluginSettingTab {
 				.addOption('groq', 'Groq')
 				.setValue(this.plugin.settings.serviceProvider)
 				.onChange(async (value) => {
-					this.plugin.settings.serviceProvider = value as 'openai' | 'groq';
+					this.plugin.settings.serviceProvider = value as ServiceProvider;
 					await this.plugin.saveSettings();
 					this.display(); // Refresh to show correct key field
 				}));

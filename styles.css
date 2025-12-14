@@ -1,7 +1,13 @@
 /* This is where you can add your custom CSS */
 
-.voice-writing-ribbon-class {
+.voice-writing-ribbon {
     color: var(--text-accent);
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+
+.voice-writing-ribbon:hover {
+    transform: scale(1.1);
 }
 
 .voice-writing-recording {
