@@ -38,6 +38,10 @@ var API_ENDPOINTS = {
   openai: "https://api.openai.com/v1/audio/transcriptions",
   groq: "https://api.groq.com/openai/v1/audio/transcriptions"
 };
+var API_TEST_ENDPOINTS = {
+  openai: "https://api.openai.com/v1/models",
+  groq: "https://api.groq.com/openai/v1/models"
+};
 var API_CONFIG = {
   TIMEOUT_MS: 3e4,
   // 30 seconds
@@ -70,7 +74,15 @@ var SUCCESS_MESSAGES = {
   RECORDING_STARTED: "\u{1F399}\uFE0F Recording started...",
   TRANSCRIPTION_COMPLETE: "\u2705 Transcription complete!",
   SETTINGS_SAVED: (service, lang) => `Settings saved: ${service} / ${lang}`,
-  COPIED_TO_CLIPBOARD: "Text copied to clipboard (No active editor)"
+  COPIED_TO_CLIPBOARD: "Text copied to clipboard (No active editor)",
+  API_KEY_VALID: "\u2705 API Key is valid!",
+  API_KEY_TEST_START: "\u{1F504} Testing API Key..."
+};
+var API_TEST_ERRORS = {
+  INVALID_KEY: "\u274C Invalid API Key. Please check and try again.",
+  QUOTA_EXCEEDED: "\u26A0\uFE0F API Quota exceeded. Check your billing.",
+  NETWORK_ERROR: "\u274C Network error. Check your internet connection.",
+  UNKNOWN_ERROR: "\u274C Test failed. Check console for details."
 };
 
 // src/recorder.ts
@@ -153,6 +165,67 @@ var MicrophoneRecorder = class {
 // src/transcription.ts
 var import_obsidian = require("obsidian");
 var TranscriptionService = class {
+  /**
+   * Test API key validity by calling the models endpoint
+   */
+  async testApiKey(apiKey, serviceProvider) {
+    var _a, _b;
+    if (!apiKey || apiKey.trim().length === 0) {
+      return {
+        success: false,
+        message: API_TEST_ERRORS.INVALID_KEY,
+        details: "API key is empty"
+      };
+    }
+    const url = API_TEST_ENDPOINTS[serviceProvider];
+    const params = {
+      url,
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${apiKey.trim()}`
+      },
+      throw: false
+    };
+    try {
+      const response = await (0, import_obsidian.requestUrl)(params);
+      console.log(`API Test Response (${serviceProvider}):`, {
+        status: response.status,
+        data: response.json
+      });
+      if (response.status === 200) {
+        return {
+          success: true,
+          message: SUCCESS_MESSAGES.API_KEY_VALID,
+          details: `Connected to ${serviceProvider.toUpperCase()} API successfully`
+        };
+      } else if (response.status === 401) {
+        return {
+          success: false,
+          message: API_TEST_ERRORS.INVALID_KEY,
+          details: ((_b = (_a = response.json) == null ? void 0 : _a.error) == null ? void 0 : _b.message) || "Authentication failed"
+        };
+      } else if (response.status === 429) {
+        return {
+          success: false,
+          message: API_TEST_ERRORS.QUOTA_EXCEEDED,
+          details: "Rate limit or quota exceeded"
+        };
+      } else {
+        return {
+          success: false,
+          message: API_TEST_ERRORS.UNKNOWN_ERROR,
+          details: `HTTP ${response.status}: ${JSON.stringify(response.json)}`
+        };
+      }
+    } catch (error) {
+      console.error("API Test Error:", error);
+      return {
+        success: false,
+        message: API_TEST_ERRORS.NETWORK_ERROR,
+        details: error instanceof Error ? error.message : "Unknown error"
+      };
+    }
+  }
   async transcribe(audioBlob, apiKey, language, serviceProvider) {
     if (!apiKey) {
       new import_obsidian.Notice(ERROR_MESSAGES.API_KEY_MISSING);
@@ -544,6 +617,19 @@ var VoiceWritingSettingTab = class extends import_obsidian3.PluginSettingTab {
     new import_obsidian3.Setting(containerEl).setName("API Key").setDesc(`Enter your ${this.plugin.settings.serviceProvider === "openai" ? "OpenAI" : "Groq"} API Key`).addText((text) => text.setPlaceholder("sk-...").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
       this.plugin.settings.apiKey = value;
       await this.plugin.saveSettings();
+    })).addButton((button) => button.setButtonText("Test API Key").setCta().onClick(async () => {
+      button.setButtonText("Testing...");
+      button.setDisabled(true);
+      const result = await this.plugin.transcriptionService.testApiKey(
+        this.plugin.settings.apiKey,
+        this.plugin.settings.serviceProvider
+      );
+      new import_obsidian3.Notice(result.message, result.success ? 3e3 : 5e3);
+      if (result.details) {
+        console.log("API Test Details:", result.details);
+      }
+      button.setButtonText("Test API Key");
+      button.setDisabled(false);
     }));
     new import_obsidian3.Setting(containerEl).setName("Default Language").setDesc('Language code for transcription (e.g., en, ko, ja). Use "auto" for auto-detection.').addDropdown((drop) => {
       const langs = [

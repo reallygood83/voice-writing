@@ -18,6 +18,12 @@ export const API_ENDPOINTS: Record<ServiceProvider, string> = {
     groq: 'https://api.groq.com/openai/v1/audio/transcriptions'
 } as const;
 
+// API Test Endpoints (for validating API keys)
+export const API_TEST_ENDPOINTS: Record<ServiceProvider, string> = {
+    openai: 'https://api.openai.com/v1/models',
+    groq: 'https://api.groq.com/openai/v1/models'
+} as const;
+
 // API Request Configuration
 export const API_CONFIG = {
     TIMEOUT_MS: 30000, // 30 seconds
@@ -57,5 +63,15 @@ export const SUCCESS_MESSAGES = {
     RECORDING_STARTED: '🎙️ Recording started...',
     TRANSCRIPTION_COMPLETE: '✅ Transcription complete!',
     SETTINGS_SAVED: (service: string, lang: string) => `Settings saved: ${service} / ${lang}`,
-    COPIED_TO_CLIPBOARD: 'Text copied to clipboard (No active editor)'
+    COPIED_TO_CLIPBOARD: 'Text copied to clipboard (No active editor)',
+    API_KEY_VALID: '✅ API Key is valid!',
+    API_KEY_TEST_START: '🔄 Testing API Key...'
+} as const;
+
+// API Test Error Messages
+export const API_TEST_ERRORS = {
+    INVALID_KEY: '❌ Invalid API Key. Please check and try again.',
+    QUOTA_EXCEEDED: '⚠️ API Quota exceeded. Check your billing.',
+    NETWORK_ERROR: '❌ Network error. Check your internet connection.',
+    UNKNOWN_ERROR: '❌ Test failed. Check console for details.'
 } as const;

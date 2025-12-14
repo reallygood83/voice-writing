@@ -237,6 +237,26 @@ class VoiceWritingSettingTab extends PluginSettingTab {
 				.onChange(async (value) => {
 					this.plugin.settings.apiKey = value;
 					await this.plugin.saveSettings();
+				}))
+			.addButton(button => button
+				.setButtonText('Test API Key')
+				.setCta()
+				.onClick(async () => {
+					button.setButtonText('Testing...');
+					button.setDisabled(true);
+
+					const result = await this.plugin.transcriptionService.testApiKey(
+						this.plugin.settings.apiKey,
+						this.plugin.settings.serviceProvider
+					);
+
+					new Notice(result.message, result.success ? 3000 : 5000);
+					if (result.details) {
+						console.log('API Test Details:', result.details);
+					}
+
+					button.setButtonText('Test API Key');
+					button.setDisabled(false);
 				}));
 				
 		new Setting(containerEl)

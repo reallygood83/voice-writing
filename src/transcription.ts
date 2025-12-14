@@ -3,9 +3,18 @@ import {
     ServiceProvider,
     MODELS,
     API_ENDPOINTS,
+    API_TEST_ENDPOINTS,
     API_CONFIG,
-    ERROR_MESSAGES
+    ERROR_MESSAGES,
+    SUCCESS_MESSAGES,
+    API_TEST_ERRORS
 } from './constants';
+
+export interface ApiTestResult {
+    success: boolean;
+    message: string;
+    details?: string;
+}
 
 export interface TranscriptionResult {
     text: string;
@@ -18,6 +27,72 @@ export interface TranscriptionError {
 }
 
 export class TranscriptionService {
+    /**
+     * Test API key validity by calling the models endpoint
+     */
+    async testApiKey(apiKey: string, serviceProvider: ServiceProvider): Promise<ApiTestResult> {
+        if (!apiKey || apiKey.trim().length === 0) {
+            return {
+                success: false,
+                message: API_TEST_ERRORS.INVALID_KEY,
+                details: 'API key is empty'
+            };
+        }
+
+        const url = API_TEST_ENDPOINTS[serviceProvider];
+
+        const params: RequestUrlParam = {
+            url: url,
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${apiKey.trim()}`
+            },
+            throw: false
+        };
+
+        try {
+            const response = await requestUrl(params);
+
+            console.log(`API Test Response (${serviceProvider}):`, {
+                status: response.status,
+                data: response.json
+            });
+
+            if (response.status === 200) {
+                return {
+                    success: true,
+                    message: SUCCESS_MESSAGES.API_KEY_VALID,
+                    details: `Connected to ${serviceProvider.toUpperCase()} API successfully`
+                };
+            } else if (response.status === 401) {
+                return {
+                    success: false,
+                    message: API_TEST_ERRORS.INVALID_KEY,
+                    details: response.json?.error?.message || 'Authentication failed'
+                };
+            } else if (response.status === 429) {
+                return {
+                    success: false,
+                    message: API_TEST_ERRORS.QUOTA_EXCEEDED,
+                    details: 'Rate limit or quota exceeded'
+                };
+            } else {
+                return {
+                    success: false,
+                    message: API_TEST_ERRORS.UNKNOWN_ERROR,
+                    details: `HTTP ${response.status}: ${JSON.stringify(response.json)}`
+                };
+            }
+        } catch (error) {
+            console.error('API Test Error:', error);
+            return {
+                success: false,
+                message: API_TEST_ERRORS.NETWORK_ERROR,
+                details: error instanceof Error ? error.message : 'Unknown error'
+            };
+        }
+    }
+
     async transcribe(
         audioBlob: Blob,
         apiKey: string,
