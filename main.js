@@ -27,7 +27,7 @@ __export(main_exports, {
   default: () => VoiceWritingPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian3 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 
 // src/constants.ts
 var MODELS = {
@@ -71,18 +71,224 @@ var ERROR_MESSAGES = {
   API_QUOTA_EXCEEDED: "API Quota Exceeded (429). Please check your plan."
 };
 var SUCCESS_MESSAGES = {
-  RECORDING_STARTED: "\u{1F399}\uFE0F Recording started...",
-  TRANSCRIPTION_COMPLETE: "\u2705 Transcription complete!",
+  RECORDING_STARTED: "Recording started...",
+  TRANSCRIPTION_COMPLETE: "Transcription complete!",
   SETTINGS_SAVED: (service, lang) => `Settings saved: ${service} / ${lang}`,
+  QUICK_SETTINGS_SAVED: (service, lang, diarization) => `Settings: ${service} / ${lang}${diarization ? " / Speaker Diarization ON" : ""}`,
   COPIED_TO_CLIPBOARD: "Text copied to clipboard (No active editor)",
-  API_KEY_VALID: "\u2705 API Key is valid!",
-  API_KEY_TEST_START: "\u{1F504} Testing API Key..."
+  API_KEY_VALID: "API key is valid!",
+  API_KEY_TEST_START: "Testing API key..."
+};
+var DIARIZATION_NOTE = {
+  INFO: "\u26A0\uFE0F \uD654\uC790 \uAD6C\uBD84\uC740 \uD604\uC7AC OpenAI/Groq Whisper API\uC5D0\uC11C \uAE30\uBCF8 \uC9C0\uC6D0\uB418\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uD5A5\uD6C4 \uC5C5\uB370\uC774\uD2B8 \uC608\uC815.",
+  LABEL: "\uD654\uC790 \uAD6C\uBD84 (Speaker Diarization)"
 };
 var API_TEST_ERRORS = {
-  INVALID_KEY: "\u274C Invalid API Key. Please check and try again.",
-  QUOTA_EXCEEDED: "\u26A0\uFE0F API Quota exceeded. Check your billing.",
-  NETWORK_ERROR: "\u274C Network error. Check your internet connection.",
-  UNKNOWN_ERROR: "\u274C Test failed. Check console for details."
+  INVALID_KEY: "Invalid API Key. Please check and try again.",
+  QUOTA_EXCEEDED: "API Quota exceeded. Check your billing.",
+  NETWORK_ERROR: "Network error. Check your internet connection.",
+  UNKNOWN_ERROR: "Test failed. Check console for details."
+};
+var SUPPORTED_AUDIO_FORMATS = [
+  "mp3",
+  "wav",
+  "webm",
+  "m4a",
+  "ogg",
+  "flac",
+  "mp4",
+  "mpeg",
+  "mpga"
+];
+var AUDIO_MIME_TYPES = {
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  webm: "audio/webm",
+  m4a: "audio/m4a",
+  ogg: "audio/ogg",
+  flac: "audio/flac",
+  mp4: "audio/mp4",
+  mpeg: "audio/mpeg",
+  mpga: "audio/mpeg"
+};
+var BUILT_IN_TEMPLATES = [
+  {
+    id: "none",
+    name: "None (Raw Transcript)",
+    nameKo: "\uC5C6\uC74C (\uC6D0\uBCF8 \uD14D\uC2A4\uD2B8)",
+    description: "Keep the original transcription without formatting",
+    prompt: "",
+    isBuiltIn: true
+  },
+  {
+    id: "meeting",
+    name: "Meeting Notes",
+    nameKo: "\uD68C\uC758\uB85D",
+    description: "Format as structured meeting notes with participants, agenda, decisions, and action items",
+    prompt: `\uB2E4\uC74C \uC804\uC0AC \uB0B4\uC6A9\uC744 \uD68C\uC758\uB85D \uD615\uC2DD\uC73C\uB85C \uC815\uB9AC\uD574\uC8FC\uC138\uC694:
+
+## \u{1F4CB} \uD68C\uC758\uB85D
+
+### \u{1F4C5} \uC77C\uC2DC
+- \uB0A0\uC9DC/\uC2DC\uAC04: [\uCD94\uC815]
+
+### \u{1F465} \uCC38\uC11D\uC790
+- [\uC5B8\uAE09\uB41C \uCC38\uC11D\uC790\uB4E4]
+
+### \u{1F4CC} \uC8FC\uC694 \uC548\uAC74
+1. [\uC548\uAC741]
+2. [\uC548\uAC742]
+
+### \u{1F4AC} \uB17C\uC758 \uB0B4\uC6A9
+[\uC8FC\uC694 \uB17C\uC758 \uB0B4\uC6A9 \uC694\uC57D]
+
+### \u2705 \uACB0\uC815 \uC0AC\uD56D
+- [\uACB0\uC8151]
+- [\uACB0\uC8152]
+
+### \u{1F4DD} Action Items
+- [ ] [\uC561\uC1581] - \uB2F4\uB2F9\uC790
+- [ ] [\uC561\uC1582] - \uB2F4\uB2F9\uC790
+
+### \u{1F51C} \uB2E4\uC74C \uB2E8\uACC4
+[\uD6C4\uC18D \uC870\uCE58 \uBC0F \uB2E4\uC74C \uD68C\uC758 \uC77C\uC815]
+
+---
+\uC6D0\uBCF8 \uC804\uC0AC:
+`,
+    isBuiltIn: true
+  },
+  {
+    id: "lecture",
+    name: "Lecture Notes",
+    nameKo: "\uAC15\uC758 \uB178\uD2B8",
+    description: "Format as organized lecture notes with key concepts and summary",
+    prompt: `\uB2E4\uC74C \uC804\uC0AC \uB0B4\uC6A9\uC744 \uAC15\uC758 \uB178\uD2B8 \uD615\uC2DD\uC73C\uB85C \uC815\uB9AC\uD574\uC8FC\uC138\uC694:
+
+## \u{1F4DA} \uAC15\uC758 \uB178\uD2B8
+
+### \u{1F3AF} \uAC15\uC758 \uC8FC\uC81C
+[\uC8FC\uC81C]
+
+### \u{1F4DD} \uD575\uC2EC \uAC1C\uB150
+1. **[\uAC1C\uB1501]**: \uC124\uBA85
+2. **[\uAC1C\uB1502]**: \uC124\uBA85
+3. **[\uAC1C\uB1503]**: \uC124\uBA85
+
+### \u{1F4D6} \uC0C1\uC138 \uB0B4\uC6A9
+[\uAC15\uC758 \uB0B4\uC6A9\uC744 \uCCB4\uACC4\uC801\uC73C\uB85C \uC815\uB9AC]
+
+### \u{1F4A1} \uC911\uC694 \uD3EC\uC778\uD2B8
+> [\uAC15\uC870\uB41C \uB0B4\uC6A9\uC774\uB098 \uC911\uC694\uD55C \uC778\uC0AC\uC774\uD2B8]
+
+### \u2753 \uC9C8\uBB38/\uD1A0\uB860 \uC0AC\uD56D
+- [\uC9C8\uBB381]
+- [\uC9C8\uBB382]
+
+### \u{1F4CB} \uC694\uC57D
+[\uC804\uCCB4 \uB0B4\uC6A9 3-5\uBB38\uC7A5 \uC694\uC57D]
+
+### \u{1F517} \uAD00\uB828 \uC790\uB8CC/\uCC38\uACE0
+- [\uAD00\uB828 \uC790\uB8CC]
+
+---
+\uC6D0\uBCF8 \uC804\uC0AC:
+`,
+    isBuiltIn: true
+  },
+  {
+    id: "idea",
+    name: "Brainstorming / Ideas",
+    nameKo: "\uC544\uC774\uB514\uC5B4 \uBE0C\uB808\uC778\uC2A4\uD1A0\uBC0D",
+    description: "Organize ideas and brainstorming sessions",
+    prompt: `\uB2E4\uC74C \uC804\uC0AC \uB0B4\uC6A9\uC744 \uC544\uC774\uB514\uC5B4 \uBE0C\uB808\uC778\uC2A4\uD1A0\uBC0D \uD615\uC2DD\uC73C\uB85C \uC815\uB9AC\uD574\uC8FC\uC138\uC694:
+
+## \u{1F4A1} \uC544\uC774\uB514\uC5B4 \uBE0C\uB808\uC778\uC2A4\uD1A0\uBC0D
+
+### \u{1F3AF} \uC8FC\uC81C/\uBAA9\uD45C
+[\uBE0C\uB808\uC778\uC2A4\uD1A0\uBC0D \uC8FC\uC81C]
+
+### \u{1F4AD} \uC544\uC774\uB514\uC5B4 \uBAA9\uB85D
+1. **[\uC544\uC774\uB514\uC5B41]**
+   - \uC124\uBA85:
+   - \uC7A5\uC810:
+   - \uB2E8\uC810:
+
+2. **[\uC544\uC774\uB514\uC5B42]**
+   - \uC124\uBA85:
+   - \uC7A5\uC810:
+   - \uB2E8\uC810:
+
+### \u2B50 Top 3 \uC720\uB9DD \uC544\uC774\uB514\uC5B4
+1. [\uAC00\uC7A5 \uC720\uB9DD\uD55C \uC544\uC774\uB514\uC5B4]
+2. [\uB450 \uBC88\uC9F8]
+3. [\uC138 \uBC88\uC9F8]
+
+### \u{1F504} \uB2E4\uC74C \uB2E8\uACC4
+- [ ] [\uC561\uC1581]
+- [ ] [\uC561\uC1582]
+
+### \u{1F4DD} \uCD94\uAC00 \uBA54\uBAA8
+[\uAE30\uD0C0 \uB17C\uC758 \uC0AC\uD56D]
+
+---
+\uC6D0\uBCF8 \uC804\uC0AC:
+`,
+    isBuiltIn: true
+  },
+  {
+    id: "interview",
+    name: "Interview Notes",
+    nameKo: "\uC778\uD130\uBDF0 \uC815\uB9AC",
+    description: "Format interview conversations with Q&A structure",
+    prompt: `\uB2E4\uC74C \uC804\uC0AC \uB0B4\uC6A9\uC744 \uC778\uD130\uBDF0 \uC815\uB9AC \uD615\uC2DD\uC73C\uB85C \uC815\uB9AC\uD574\uC8FC\uC138\uC694:
+
+## \u{1F3A4} \uC778\uD130\uBDF0 \uC815\uB9AC
+
+### \u{1F4C5} \uC778\uD130\uBDF0 \uC815\uBCF4
+- \uC77C\uC2DC: [\uCD94\uC815]
+- \uC778\uD130\uBDF0\uC774: [\uC774\uB984/\uC5ED\uD560]
+- \uC778\uD130\uBDF0\uC5B4: [\uC774\uB984/\uC5ED\uD560]
+
+### \u{1F3AF} \uC778\uD130\uBDF0 \uBAA9\uC801
+[\uC778\uD130\uBDF0 \uBAA9\uC801]
+
+### \u{1F4AC} \uC8FC\uC694 Q&A
+
+**Q1: [\uC9C8\uBB38]**
+> A: [\uB2F5\uBCC0 \uC694\uC57D]
+
+**Q2: [\uC9C8\uBB38]**
+> A: [\uB2F5\uBCC0 \uC694\uC57D]
+
+### \u{1F4CC} \uD575\uC2EC \uC778\uC0AC\uC774\uD2B8
+1. [\uC778\uC0AC\uC774\uD2B81]
+2. [\uC778\uC0AC\uC774\uD2B82]
+3. [\uC778\uC0AC\uC774\uD2B83]
+
+### \u{1F4A1} \uC8FC\uC694 \uC778\uC6A9\uAD6C
+> "[\uAE30\uC5B5\uC5D0 \uB0A8\uB294 \uC778\uC6A9]"
+
+### \u{1F4DD} \uD6C4\uC18D \uC870\uCE58
+- [ ] [\uC561\uC1581]
+- [ ] [\uC561\uC1582]
+
+---
+\uC6D0\uBCF8 \uC804\uC0AC:
+`,
+    isBuiltIn: true
+  }
+];
+var TEMPLATE_MESSAGES = {
+  SELECT_TEMPLATE: "Select a template to format the transcription",
+  FORMATTING: "Formatting with template...",
+  FORMAT_COMPLETE: "Formatting complete!",
+  FORMAT_FAILED: "Formatting failed. Original text preserved.",
+  CUSTOM_TEMPLATE_SAVED: "Custom template saved!",
+  CUSTOM_TEMPLATE_DELETED: "Template deleted.",
+  FILE_UPLOAD_SUCCESS: "File uploaded and transcribed!",
+  FILE_TOO_LARGE: "File too large. Maximum size is 25MB.",
+  INVALID_FILE_TYPE: "Invalid file type. Supported: mp3, wav, m4a, webm, ogg, flac"
 };
 
 // src/recorder.ts
@@ -351,9 +557,68 @@ var TranscriptionService = class {
   }
 };
 
-// src/modals.ts
+// src/formatting.ts
 var import_obsidian2 = require("obsidian");
-var RecordingModal = class extends import_obsidian2.Modal {
+var FormattingService = class {
+  /**
+   * Format transcription text using AI based on the selected template
+   */
+  async formatTranscription(transcriptionText, template, apiKey, serviceProvider) {
+    if (!template.prompt || template.id === "none") {
+      return { text: transcriptionText, success: true };
+    }
+    const fullPrompt = `${template.prompt}
+
+${transcriptionText}`;
+    try {
+      const formattedText = await this.callChatAPI(fullPrompt, apiKey, serviceProvider);
+      return { text: formattedText, success: true };
+    } catch (error) {
+      console.error("Formatting error:", error);
+      return { text: transcriptionText, success: false };
+    }
+  }
+  /**
+   * Call OpenAI or Groq Chat API for text formatting
+   */
+  async callChatAPI(prompt, apiKey, serviceProvider) {
+    const endpoint = serviceProvider === "openai" ? "https://api.openai.com/v1/chat/completions" : "https://api.groq.com/openai/v1/chat/completions";
+    const model = serviceProvider === "openai" ? "gpt-4o-mini" : "llama-3.1-8b-instant";
+    const response = await (0, import_obsidian2.requestUrl)({
+      url: endpoint,
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: "system",
+            content: "\uB2F9\uC2E0\uC740 \uC804\uBB38 \uBB38\uC11C \uC815\uB9AC \uB3C4\uC6B0\uBBF8\uC785\uB2C8\uB2E4. \uC0AC\uC6A9\uC790\uAC00 \uC81C\uACF5\uD558\uB294 \uC804\uC0AC \uB0B4\uC6A9\uC744 \uC694\uCCAD\uB41C \uD615\uC2DD\uC5D0 \uB9DE\uAC8C \uAE54\uB054\uD558\uAC8C \uC815\uB9AC\uD574\uC8FC\uC138\uC694. \uB9C8\uD06C\uB2E4\uC6B4 \uD615\uC2DD\uC744 \uC0AC\uC6A9\uD558\uACE0, \uC6D0\uBCF8 \uB0B4\uC6A9\uC758 \uD575\uC2EC\uC744 \uC720\uC9C0\uD558\uBA74\uC11C \uAD6C\uC870\uD654\uD574\uC8FC\uC138\uC694."
+          },
+          {
+            role: "user",
+            content: prompt
+          }
+        ],
+        temperature: 0.3,
+        // Lower temperature for consistent formatting
+        max_tokens: 4e3
+      })
+    });
+    if (response.status !== 200) {
+      throw new Error(`API request failed with status ${response.status}`);
+    }
+    const data = response.json;
+    return data.choices[0].message.content;
+  }
+};
+
+// src/modals.ts
+var import_obsidian3 = require("obsidian");
+var RecordingModal = class extends import_obsidian3.Modal {
   constructor(app, onStop) {
     super(app);
     this.onStop = onStop;
@@ -365,7 +630,7 @@ var RecordingModal = class extends import_obsidian2.Modal {
     const container = contentEl.createDiv({ cls: "recording-container" });
     const iconWrapper = container.createDiv({ cls: "recording-icon-wrapper" });
     iconWrapper.createDiv({ cls: "recording-pulse-ring" });
-    iconWrapper.createEl("span", { text: "\u{1F399}\uFE0F", cls: "recording-icon" });
+    iconWrapper.createEl("span", { text: "", cls: "recording-icon mic-icon" });
     container.createEl("h2", { text: "Recording in Progress..." });
     this.timerEl = container.createDiv({ cls: "recording-timer", text: "00:00" });
     this.startTime = Date.now();
@@ -394,7 +659,7 @@ var RecordingModal = class extends import_obsidian2.Modal {
     this.contentEl.empty();
   }
 };
-var ProcessingModal = class extends import_obsidian2.Modal {
+var ProcessingModal = class extends import_obsidian3.Modal {
   constructor(app) {
     super(app);
   }
@@ -406,7 +671,7 @@ var ProcessingModal = class extends import_obsidian2.Modal {
     const spinner = container.createDiv({ cls: "voice-writing-spinner" });
     spinner.createDiv({ cls: "double-bounce1" });
     spinner.createDiv({ cls: "double-bounce2" });
-    container.createEl("h2", { text: "\u2728 Transcribing..." });
+    container.createEl("h2", { text: "Transcribing..." });
     container.createEl("p", { text: "Sending audio to AI for text conversion." });
     container.createEl("small", { text: "This usually takes a few seconds.", cls: "processing-hint" });
   }
@@ -415,11 +680,12 @@ var ProcessingModal = class extends import_obsidian2.Modal {
     contentEl.empty();
   }
 };
-var QuickOptionModal = class extends import_obsidian2.Modal {
-  constructor(app, currentLanguage, currentService, onSelect) {
+var QuickOptionModal = class extends import_obsidian3.Modal {
+  constructor(app, currentLanguage, currentService, currentDiarization, onSelect) {
     super(app);
     this.currentLanguage = currentLanguage;
     this.currentService = currentService;
+    this.currentDiarization = currentDiarization;
     this.onSelect = onSelect;
   }
   onOpen() {
@@ -428,18 +694,22 @@ var QuickOptionModal = class extends import_obsidian2.Modal {
     contentEl.createEl("h2", { text: "Voice Writing Options" });
     let tempLanguage = this.currentLanguage;
     let tempService = this.currentService;
-    new import_obsidian2.Setting(contentEl).setName("Language").setDesc("Select audio language").addDropdown((drop) => {
+    let tempDiarization = this.currentDiarization;
+    new import_obsidian3.Setting(contentEl).setName("Language").setDesc("Select audio language").addDropdown((drop) => {
       SUPPORTED_LANGUAGES.forEach((lang) => {
         drop.addOption(lang.code, lang.name);
       });
       drop.setValue(tempLanguage).onChange((value) => tempLanguage = value);
     });
-    new import_obsidian2.Setting(contentEl).setName("Service").setDesc("Transcription provider").addDropdown(
+    new import_obsidian3.Setting(contentEl).setName("Service").setDesc("Transcription provider").addDropdown(
       (drop) => drop.addOption("openai", "OpenAI Whisper").addOption("groq", "Groq (Fast)").setValue(tempService).onChange((value) => tempService = value)
     );
-    new import_obsidian2.Setting(contentEl).addButton(
+    new import_obsidian3.Setting(contentEl).setName(DIARIZATION_NOTE.LABEL).setDesc(DIARIZATION_NOTE.INFO).addToggle(
+      (toggle) => toggle.setValue(tempDiarization).onChange((value) => tempDiarization = value)
+    );
+    new import_obsidian3.Setting(contentEl).addButton(
       (btn) => btn.setButtonText("Apply").setCta().onClick(() => {
-        this.onSelect(tempLanguage, tempService);
+        this.onSelect(tempLanguage, tempService, tempDiarization);
         this.close();
       })
     );
@@ -448,14 +718,167 @@ var QuickOptionModal = class extends import_obsidian2.Modal {
     this.contentEl.empty();
   }
 };
+var FileUploadModal = class extends import_obsidian3.Modal {
+  constructor(app, onFileSelected) {
+    super(app);
+    this.onFileSelected = onFileSelected;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("voice-writing-upload-modal");
+    const container = contentEl.createDiv({ cls: "upload-container" });
+    container.createEl("h2", { text: "Upload Audio File" });
+    container.createEl("p", {
+      text: "Select an audio file to transcribe.",
+      cls: "upload-description"
+    });
+    const formatsInfo = container.createDiv({ cls: "supported-formats" });
+    formatsInfo.createEl("small", {
+      text: `Supported: ${SUPPORTED_AUDIO_FORMATS.join(", ")} (Max ${API_CONFIG.MAX_FILE_SIZE_MB}MB)`
+    });
+    const dropZone = container.createDiv({ cls: "upload-drop-zone" });
+    dropZone.createEl("span", { text: "", cls: "upload-icon audio-icon" });
+    dropZone.createEl("p", { text: "Drag & drop audio file here" });
+    dropZone.createEl("p", { text: "or", cls: "upload-or" });
+    this.fileInputEl = dropZone.createEl("input", {
+      type: "file",
+      cls: "upload-file-input"
+    });
+    this.fileInputEl.accept = SUPPORTED_AUDIO_FORMATS.map((ext) => `.${ext}`).join(",");
+    this.fileInputEl.style.display = "none";
+    const browseBtn = dropZone.createEl("button", {
+      text: "Browse Files",
+      cls: "mod-cta upload-browse-btn"
+    });
+    browseBtn.onclick = () => this.fileInputEl.click();
+    this.fileInputEl.onchange = () => {
+      const files = this.fileInputEl.files;
+      if (files && files.length > 0) {
+        this.handleFile(files[0]);
+      }
+    };
+    dropZone.ondragover = (e) => {
+      e.preventDefault();
+      dropZone.addClass("drag-over");
+    };
+    dropZone.ondragleave = () => {
+      dropZone.removeClass("drag-over");
+    };
+    dropZone.ondrop = (e) => {
+      var _a;
+      e.preventDefault();
+      dropZone.removeClass("drag-over");
+      const files = (_a = e.dataTransfer) == null ? void 0 : _a.files;
+      if (files && files.length > 0) {
+        this.handleFile(files[0]);
+      }
+    };
+    const btnContainer = container.createDiv({ cls: "upload-buttons" });
+    const cancelBtn = btnContainer.createEl("button", {
+      text: "Cancel",
+      cls: "upload-cancel-btn"
+    });
+    cancelBtn.onclick = () => this.close();
+  }
+  handleFile(file) {
+    var _a;
+    const ext = ((_a = file.name.split(".").pop()) == null ? void 0 : _a.toLowerCase()) || "";
+    if (!SUPPORTED_AUDIO_FORMATS.includes(ext)) {
+      const errorEl = this.contentEl.querySelector(".upload-error");
+      if (errorEl)
+        errorEl.remove();
+      const error = this.contentEl.createDiv({ cls: "upload-error" });
+      error.createEl("span", { text: TEMPLATE_MESSAGES.INVALID_FILE_TYPE });
+      return;
+    }
+    const maxSize = API_CONFIG.MAX_FILE_SIZE_MB * 1024 * 1024;
+    if (file.size > maxSize) {
+      const errorEl = this.contentEl.querySelector(".upload-error");
+      if (errorEl)
+        errorEl.remove();
+      const error = this.contentEl.createDiv({ cls: "upload-error" });
+      error.createEl("span", { text: TEMPLATE_MESSAGES.FILE_TOO_LARGE });
+      return;
+    }
+    this.onFileSelected(file);
+    this.close();
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+var TemplateSelectionModal = class extends import_obsidian3.Modal {
+  constructor(app, customTemplates, onTemplateSelected) {
+    super(app);
+    this.customTemplates = customTemplates;
+    this.onTemplateSelected = onTemplateSelected;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("voice-writing-template-modal");
+    const container = contentEl.createDiv({ cls: "template-container" });
+    container.createEl("h2", { text: "Format Transcription" });
+    container.createEl("p", {
+      text: TEMPLATE_MESSAGES.SELECT_TEMPLATE,
+      cls: "template-description"
+    });
+    const grid = container.createDiv({ cls: "template-grid" });
+    for (const template of BUILT_IN_TEMPLATES) {
+      this.createTemplateCard(grid, template);
+    }
+    if (this.customTemplates.length > 0) {
+      container.createEl("h3", { text: "Custom Templates", cls: "custom-templates-header" });
+      const customGrid = container.createDiv({ cls: "template-grid" });
+      for (const template of this.customTemplates) {
+        this.createTemplateCard(customGrid, template);
+      }
+    }
+    const btnContainer = container.createDiv({ cls: "template-buttons" });
+    const cancelBtn = btnContainer.createEl("button", {
+      text: "Skip (Use Raw Text)",
+      cls: "template-skip-btn"
+    });
+    cancelBtn.onclick = () => {
+      this.onTemplateSelected(null);
+      this.close();
+    };
+  }
+  createTemplateCard(parent, template) {
+    const card = parent.createDiv({ cls: "template-card" });
+    const iconClasses = {
+      "none": "template-icon-none",
+      "meeting": "template-icon-meeting",
+      "lecture": "template-icon-lecture",
+      "idea": "template-icon-idea",
+      "interview": "template-icon-interview",
+      "custom": "template-icon-custom"
+    };
+    const iconClass = iconClasses[template.id] || "template-icon-default";
+    card.createEl("span", { cls: `template-icon ${iconClass}` });
+    card.createEl("h4", { text: template.nameKo || template.name });
+    card.createEl("p", { text: template.description, cls: "template-desc" });
+    card.onclick = () => {
+      this.onTemplateSelected(template);
+      this.close();
+    };
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
 
 // main.ts
 var DEFAULT_SETTINGS = {
-  apiKey: "",
+  openaiApiKey: "",
+  groqApiKey: "",
   language: "auto",
-  serviceProvider: "openai"
+  serviceProvider: "openai",
+  enableSpeakerDiarization: false,
+  customTemplates: []
 };
-var VoiceWritingPlugin = class extends import_obsidian3.Plugin {
+var VoiceWritingPlugin = class extends import_obsidian4.Plugin {
   constructor() {
     super(...arguments);
     this.recordingModal = null;
@@ -464,6 +887,7 @@ var VoiceWritingPlugin = class extends import_obsidian3.Plugin {
     await this.loadSettings();
     this.recorder = new MicrophoneRecorder();
     this.transcriptionService = new TranscriptionService();
+    this.formattingService = new FormattingService();
     this.ribbonIconEl = this.addRibbonIcon("mic", "Voice Writing", (evt) => {
       this.toggleRecording();
     });
@@ -487,11 +911,27 @@ var VoiceWritingPlugin = class extends import_obsidian3.Plugin {
       id: "quick-options",
       name: "Quick Options",
       callback: () => {
-        new QuickOptionModal(this.app, this.settings.language, this.settings.serviceProvider, async (lang, service) => {
-          this.settings.language = lang;
-          this.settings.serviceProvider = service;
-          await this.saveSettings();
-          new import_obsidian3.Notice(SUCCESS_MESSAGES.SETTINGS_SAVED(service, lang));
+        new QuickOptionModal(
+          this.app,
+          this.settings.language,
+          this.settings.serviceProvider,
+          this.settings.enableSpeakerDiarization,
+          async (lang, service, diarization) => {
+            this.settings.language = lang;
+            this.settings.serviceProvider = service;
+            this.settings.enableSpeakerDiarization = diarization;
+            await this.saveSettings();
+            new import_obsidian4.Notice(SUCCESS_MESSAGES.QUICK_SETTINGS_SAVED(service, lang, diarization));
+          }
+        ).open();
+      }
+    });
+    this.addCommand({
+      id: "upload-audio-file",
+      name: "Upload Audio File",
+      callback: () => {
+        new FileUploadModal(this.app, (file) => {
+          this.transcribeFile(file);
         }).open();
       }
     });
@@ -507,7 +947,7 @@ var VoiceWritingPlugin = class extends import_obsidian3.Plugin {
   async startRecording() {
     try {
       await this.recorder.startRecording();
-      new import_obsidian3.Notice(SUCCESS_MESSAGES.RECORDING_STARTED);
+      new import_obsidian4.Notice(SUCCESS_MESSAGES.RECORDING_STARTED);
       this.ribbonIconEl.addClass("voice-writing-recording");
       this.updateStatusBar("Recording...");
       this.recordingModal = new RecordingModal(this.app, () => {
@@ -517,9 +957,9 @@ var VoiceWritingPlugin = class extends import_obsidian3.Plugin {
     } catch (error) {
       const recordingError = error;
       if (recordingError && recordingError.type) {
-        new import_obsidian3.Notice(recordingError.message);
+        new import_obsidian4.Notice(recordingError.message);
       } else {
-        new import_obsidian3.Notice(ERROR_MESSAGES.MICROPHONE_GENERAL_ERROR);
+        new import_obsidian4.Notice(ERROR_MESSAGES.MICROPHONE_GENERAL_ERROR);
       }
       console.error("Recording error:", error);
     }
@@ -537,42 +977,66 @@ var VoiceWritingPlugin = class extends import_obsidian3.Plugin {
       processingModal.open();
       const fileName = `recording-${Date.now()}.webm`;
       const arrayBuffer = await blob.arrayBuffer();
-      await this.app.vault.createBinary(fileName, new Uint8Array(arrayBuffer));
+      await this.app.vault.createBinary(fileName, arrayBuffer);
       try {
+        const apiKey = this.settings.serviceProvider === "openai" ? this.settings.openaiApiKey : this.settings.groqApiKey;
         const result = await this.transcriptionService.transcribe(
           blob,
-          this.settings.apiKey,
+          apiKey,
           this.settings.language,
           this.settings.serviceProvider
         );
         processingModal.close();
-        new import_obsidian3.Notice(SUCCESS_MESSAGES.TRANSCRIPTION_COMPLETE);
+        new import_obsidian4.Notice(SUCCESS_MESSAGES.TRANSCRIPTION_COMPLETE);
         this.updateStatusBar("Idle");
-        const activeView = this.app.workspace.getActiveViewOfType(import_obsidian3.MarkdownView);
-        if (activeView) {
-          const editor = activeView.editor;
-          const template = `![[${fileName}]]
+        new TemplateSelectionModal(
+          this.app,
+          this.settings.customTemplates,
+          async (selectedTemplate) => {
+            let finalText = result.text;
+            if (selectedTemplate && selectedTemplate.id !== "none") {
+              new import_obsidian4.Notice(TEMPLATE_MESSAGES.FORMATTING);
+              const apiKey2 = this.settings.serviceProvider === "openai" ? this.settings.openaiApiKey : this.settings.groqApiKey;
+              const formatResult = await this.formattingService.formatTranscription(
+                result.text,
+                selectedTemplate,
+                apiKey2,
+                this.settings.serviceProvider
+              );
+              if (formatResult.success) {
+                finalText = formatResult.text;
+                new import_obsidian4.Notice(TEMPLATE_MESSAGES.FORMAT_COMPLETE);
+              } else {
+                new import_obsidian4.Notice(TEMPLATE_MESSAGES.FORMAT_FAILED);
+              }
+            }
+            const activeView = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
+            if (activeView) {
+              const editor = activeView.editor;
+              const content = `![[${fileName}]]
 
-${result.text}
+${finalText}
 `;
-          editor.replaceSelection(template);
-        } else {
-          new import_obsidian3.Notice(SUCCESS_MESSAGES.COPIED_TO_CLIPBOARD);
-          navigator.clipboard.writeText(result.text);
-        }
+              editor.replaceSelection(content);
+            } else {
+              new import_obsidian4.Notice(SUCCESS_MESSAGES.COPIED_TO_CLIPBOARD);
+              navigator.clipboard.writeText(finalText);
+            }
+          }
+        ).open();
       } catch (error) {
         processingModal.close();
         console.error(error);
         this.updateStatusBar("Error");
         const errMsg = error.message;
         if (errMsg === "API_UNAUTHORIZED") {
-          new import_obsidian3.Notice(ERROR_MESSAGES.API_UNAUTHORIZED, 5e3);
+          new import_obsidian4.Notice(ERROR_MESSAGES.API_UNAUTHORIZED, 5e3);
         } else if (errMsg === "API_QUOTA_EXCEEDED") {
-          new import_obsidian3.Notice(ERROR_MESSAGES.API_QUOTA_EXCEEDED, 5e3);
+          new import_obsidian4.Notice(ERROR_MESSAGES.API_QUOTA_EXCEEDED, 5e3);
         } else {
-          new import_obsidian3.Notice("\u274C Transcription failed. Audio saved locally.");
+          new import_obsidian4.Notice("Transcription failed. Audio saved locally.");
         }
-        const activeView = this.app.workspace.getActiveViewOfType(import_obsidian3.MarkdownView);
+        const activeView = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
         if (activeView) {
           activeView.editor.replaceSelection(`![[${fileName}]]
 `);
@@ -581,6 +1045,75 @@ ${result.text}
     } catch (error) {
       this.ribbonIconEl.removeClass("voice-writing-recording");
       this.updateStatusBar("Idle");
+    }
+  }
+  async transcribeFile(file) {
+    var _a;
+    const processingModal = new ProcessingModal(this.app);
+    processingModal.open();
+    this.updateStatusBar("Processing...");
+    try {
+      const ext = ((_a = file.name.split(".").pop()) == null ? void 0 : _a.toLowerCase()) || "";
+      const mimeType = AUDIO_MIME_TYPES[ext] || "audio/mpeg";
+      const arrayBuffer = await file.arrayBuffer();
+      const blob = new Blob([arrayBuffer], { type: mimeType });
+      const apiKey = this.settings.serviceProvider === "openai" ? this.settings.openaiApiKey : this.settings.groqApiKey;
+      const result = await this.transcriptionService.transcribe(
+        blob,
+        apiKey,
+        this.settings.language,
+        this.settings.serviceProvider
+      );
+      processingModal.close();
+      new import_obsidian4.Notice(SUCCESS_MESSAGES.TRANSCRIPTION_COMPLETE);
+      this.updateStatusBar("Idle");
+      new TemplateSelectionModal(
+        this.app,
+        this.settings.customTemplates,
+        async (selectedTemplate) => {
+          let finalText = result.text;
+          if (selectedTemplate && selectedTemplate.id !== "none") {
+            new import_obsidian4.Notice(TEMPLATE_MESSAGES.FORMATTING);
+            const apiKey2 = this.settings.serviceProvider === "openai" ? this.settings.openaiApiKey : this.settings.groqApiKey;
+            const formatResult = await this.formattingService.formatTranscription(
+              result.text,
+              selectedTemplate,
+              apiKey2,
+              this.settings.serviceProvider
+            );
+            if (formatResult.success) {
+              finalText = formatResult.text;
+              new import_obsidian4.Notice(TEMPLATE_MESSAGES.FORMAT_COMPLETE);
+            } else {
+              new import_obsidian4.Notice(TEMPLATE_MESSAGES.FORMAT_FAILED);
+            }
+          }
+          const activeView = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
+          if (activeView) {
+            const editor = activeView.editor;
+            const content = `**File: ${file.name}**
+
+${finalText}
+`;
+            editor.replaceSelection(content);
+          } else {
+            new import_obsidian4.Notice(SUCCESS_MESSAGES.COPIED_TO_CLIPBOARD);
+            navigator.clipboard.writeText(finalText);
+          }
+        }
+      ).open();
+    } catch (error) {
+      processingModal.close();
+      console.error("Transcription error:", error);
+      this.updateStatusBar("Error");
+      const errMsg = error.message;
+      if (errMsg === "API_UNAUTHORIZED") {
+        new import_obsidian4.Notice(ERROR_MESSAGES.API_UNAUTHORIZED, 5e3);
+      } else if (errMsg === "API_QUOTA_EXCEEDED") {
+        new import_obsidian4.Notice(ERROR_MESSAGES.API_QUOTA_EXCEEDED, 5e3);
+      } else {
+        new import_obsidian4.Notice("Transcription failed. Please try again.");
+      }
     }
   }
   updateStatusBar(text) {
@@ -600,7 +1133,7 @@ ${result.text}
     await this.saveData(this.settings);
   }
 };
-var VoiceWritingSettingTab = class extends import_obsidian3.PluginSettingTab {
+var VoiceWritingSettingTab = class extends import_obsidian4.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -609,29 +1142,50 @@ var VoiceWritingSettingTab = class extends import_obsidian3.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "Voice Writing Settings" });
-    new import_obsidian3.Setting(containerEl).setName("Service Provider").setDesc("Choose between OpenAI (Best quality) or Groq (Fastest)").addDropdown((drop) => drop.addOption("openai", "OpenAI").addOption("groq", "Groq").setValue(this.plugin.settings.serviceProvider).onChange(async (value) => {
+    new import_obsidian4.Setting(containerEl).setName("Service Provider").setDesc("Choose between OpenAI (Best quality) or Groq (Fastest)").addDropdown((drop) => drop.addOption("openai", "OpenAI").addOption("groq", "Groq").setValue(this.plugin.settings.serviceProvider).onChange(async (value) => {
       this.plugin.settings.serviceProvider = value;
       await this.plugin.saveSettings();
       this.display();
     }));
-    new import_obsidian3.Setting(containerEl).setName("API Key").setDesc(`Enter your ${this.plugin.settings.serviceProvider === "openai" ? "OpenAI" : "Groq"} API Key`).addText((text) => text.setPlaceholder("sk-...").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
-      this.plugin.settings.apiKey = value;
+    new import_obsidian4.Setting(containerEl).setName("OpenAI API Key").setDesc("Enter your OpenAI API Key").addText((text) => text.setPlaceholder("sk-...").setValue(this.plugin.settings.openaiApiKey).onChange(async (value) => {
+      this.plugin.settings.openaiApiKey = value;
       await this.plugin.saveSettings();
-    })).addButton((button) => button.setButtonText("Test API Key").setCta().onClick(async () => {
+    })).addButton((button) => button.setButtonText("Test").setCta().onClick(async () => {
       button.setButtonText("Testing...");
       button.setDisabled(true);
       const result = await this.plugin.transcriptionService.testApiKey(
-        this.plugin.settings.apiKey,
-        this.plugin.settings.serviceProvider
+        this.plugin.settings.openaiApiKey,
+        "openai"
       );
-      new import_obsidian3.Notice(result.message, result.success ? 3e3 : 5e3);
+      new import_obsidian4.Notice(result.message, result.success ? 3e3 : 5e3);
       if (result.details) {
-        console.log("API Test Details:", result.details);
+        console.log("OpenAI API Test Details:", result.details);
       }
-      button.setButtonText("Test API Key");
+      button.setButtonText("Test");
       button.setDisabled(false);
     }));
-    new import_obsidian3.Setting(containerEl).setName("Default Language").setDesc('Language code for transcription (e.g., en, ko, ja). Use "auto" for auto-detection.').addDropdown((drop) => {
+    new import_obsidian4.Setting(containerEl).setName("Groq API Key").setDesc("Enter your Groq API Key").addText((text) => text.setPlaceholder("gsk_...").setValue(this.plugin.settings.groqApiKey).onChange(async (value) => {
+      this.plugin.settings.groqApiKey = value;
+      await this.plugin.saveSettings();
+    })).addButton((button) => button.setButtonText("Test").setCta().onClick(async () => {
+      button.setButtonText("Testing...");
+      button.setDisabled(true);
+      const result = await this.plugin.transcriptionService.testApiKey(
+        this.plugin.settings.groqApiKey,
+        "groq"
+      );
+      new import_obsidian4.Notice(result.message, result.success ? 3e3 : 5e3);
+      if (result.details) {
+        console.log("Groq API Test Details:", result.details);
+      }
+      button.setButtonText("Test");
+      button.setDisabled(false);
+    }));
+    new import_obsidian4.Setting(containerEl).setName(DIARIZATION_NOTE.LABEL).setDesc(DIARIZATION_NOTE.INFO).addToggle((toggle) => toggle.setValue(this.plugin.settings.enableSpeakerDiarization).onChange(async (value) => {
+      this.plugin.settings.enableSpeakerDiarization = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian4.Setting(containerEl).setName("Default Language").setDesc('Language code for transcription (e.g., en, ko, ja). Use "auto" for auto-detection.').addDropdown((drop) => {
       const langs = [
         { code: "auto", name: "Auto Detect" },
         { code: "en", name: "English" },

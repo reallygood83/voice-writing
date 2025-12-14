@@ -1,25 +1,42 @@
 import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, requestUrl } from 'obsidian';
 import { MicrophoneRecorder, RecordingError } from './src/recorder';
 import { TranscriptionService } from './src/transcription';
-import { RecordingModal, ProcessingModal, QuickOptionModal } from './src/modals';
-import { ServiceProvider, SUCCESS_MESSAGES, ERROR_MESSAGES } from './src/constants';
+import { FormattingService } from './src/formatting';
+import { RecordingModal, ProcessingModal, QuickOptionModal, FileUploadModal, TemplateSelectionModal } from './src/modals';
+import {
+	ServiceProvider,
+	SUCCESS_MESSAGES,
+	ERROR_MESSAGES,
+	DIARIZATION_NOTE,
+	FormattingTemplate,
+	BUILT_IN_TEMPLATES,
+	TEMPLATE_MESSAGES,
+	AUDIO_MIME_TYPES
+} from './src/constants';
 
 interface VoiceWritingSettings {
-	apiKey: string;
+	openaiApiKey: string;
+	groqApiKey: string;
 	language: string;
 	serviceProvider: ServiceProvider;
+	enableSpeakerDiarization: boolean;
+	customTemplates: FormattingTemplate[];
 }
 
 const DEFAULT_SETTINGS: VoiceWritingSettings = {
-	apiKey: '',
+	openaiApiKey: '',
+	groqApiKey: '',
 	language: 'auto',
-	serviceProvider: 'openai'
+	serviceProvider: 'openai',
+	enableSpeakerDiarization: false,
+	customTemplates: []
 }
 
 export default class VoiceWritingPlugin extends Plugin {
 	settings: VoiceWritingSettings;
 	recorder: MicrophoneRecorder;
 	transcriptionService: TranscriptionService;
+	formattingService: FormattingService;
 	statusBarItem: HTMLElement;
 	ribbonIconEl: HTMLElement;
 	recordingModal: RecordingModal | null = null;
@@ -29,6 +46,7 @@ export default class VoiceWritingPlugin extends Plugin {
 
 		this.recorder = new MicrophoneRecorder();
 		this.transcriptionService = new TranscriptionService();
+		this.formattingService = new FormattingService();
 
 		// Ribbon Icon
 		this.ribbonIconEl = this.addRibbonIcon('mic', 'Voice Writing', (evt: MouseEvent) => {
@@ -60,11 +78,28 @@ export default class VoiceWritingPlugin extends Plugin {
 			id: 'quick-options',
 			name: 'Quick Options',
 			callback: () => {
-				new QuickOptionModal(this.app, this.settings.language, this.settings.serviceProvider, async (lang, service) => {
-					this.settings.language = lang;
-					this.settings.serviceProvider = service;
-					await this.saveSettings();
-					new Notice(SUCCESS_MESSAGES.SETTINGS_SAVED(service, lang));
+				new QuickOptionModal(
+					this.app,
+					this.settings.language,
+					this.settings.serviceProvider,
+					this.settings.enableSpeakerDiarization,
+					async (lang, service, diarization) => {
+						this.settings.language = lang;
+						this.settings.serviceProvider = service;
+						this.settings.enableSpeakerDiarization = diarization;
+						await this.saveSettings();
+						new Notice(SUCCESS_MESSAGES.QUICK_SETTINGS_SAVED(service, lang, diarization));
+					}
+				).open();
+			}
+		});
+
+		this.addCommand({
+			id: 'upload-audio-file',
+			name: 'Upload Audio File',
+			callback: () => {
+				new FileUploadModal(this.app, (file) => {
+					this.transcribeFile(file);
 				}).open();
 			}
 		});
@@ -123,14 +158,17 @@ export default class VoiceWritingPlugin extends Plugin {
 			// 1. Save Audio File
 			const fileName = `recording-${Date.now()}.webm`;
 			const arrayBuffer = await blob.arrayBuffer();
-			await this.app.vault.createBinary(fileName, new Uint8Array(arrayBuffer));
+			await this.app.vault.createBinary(fileName, arrayBuffer);
 			
 			// 2. Transcribe
 			try {
+				const apiKey = this.settings.serviceProvider === 'openai'
+					? this.settings.openaiApiKey
+					: this.settings.groqApiKey;
 				const result = await this.transcriptionService.transcribe(
-					blob, 
-					this.settings.apiKey, 
-					this.settings.language, 
+					blob,
+					apiKey,
+					this.settings.language,
 					this.settings.serviceProvider
 				);
 
@@ -138,17 +176,48 @@ export default class VoiceWritingPlugin extends Plugin {
 				new Notice(SUCCESS_MESSAGES.TRANSCRIPTION_COMPLETE);
 				this.updateStatusBar('Idle');
 
-				// 3. Insert into Editor
-				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (activeView) {
-					const editor = activeView.editor;
-					const template = `![[${fileName}]]\n\n${result.text}\n`;
-					editor.replaceSelection(template);
-				} else {
-					// No active editor - copy to clipboard
-					new Notice(SUCCESS_MESSAGES.COPIED_TO_CLIPBOARD);
-					navigator.clipboard.writeText(result.text);
-				}
+				// 3. Show Template Selection Modal
+				new TemplateSelectionModal(
+					this.app,
+					this.settings.customTemplates,
+					async (selectedTemplate) => {
+						let finalText = result.text;
+
+						// Format if template selected (not null and not 'none')
+						if (selectedTemplate && selectedTemplate.id !== 'none') {
+							new Notice(TEMPLATE_MESSAGES.FORMATTING);
+							const apiKey = this.settings.serviceProvider === 'openai'
+								? this.settings.openaiApiKey
+								: this.settings.groqApiKey;
+
+							const formatResult = await this.formattingService.formatTranscription(
+								result.text,
+								selectedTemplate,
+								apiKey,
+								this.settings.serviceProvider
+							);
+
+							if (formatResult.success) {
+								finalText = formatResult.text;
+								new Notice(TEMPLATE_MESSAGES.FORMAT_COMPLETE);
+							} else {
+								new Notice(TEMPLATE_MESSAGES.FORMAT_FAILED);
+							}
+						}
+
+						// Insert into Editor
+						const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+						if (activeView) {
+							const editor = activeView.editor;
+							const content = `![[${fileName}]]\n\n${finalText}\n`;
+							editor.replaceSelection(content);
+						} else {
+							// No active editor - copy to clipboard
+							new Notice(SUCCESS_MESSAGES.COPIED_TO_CLIPBOARD);
+							navigator.clipboard.writeText(finalText);
+						}
+					}
+				).open();
 
 			} catch (error) {
 				processingModal.close();
@@ -162,7 +231,7 @@ export default class VoiceWritingPlugin extends Plugin {
 				} else if (errMsg === 'API_QUOTA_EXCEEDED') {
 					new Notice(ERROR_MESSAGES.API_QUOTA_EXCEEDED, 5000);
 				} else {
-					new Notice('❌ Transcription failed. Audio saved locally.');
+					new Notice('Transcription failed. Audio saved locally.');
 				}
 
 				// Still insert the audio link
@@ -176,6 +245,97 @@ export default class VoiceWritingPlugin extends Plugin {
 			// This catches recorder stop errors (e.g. no recording active)
 			this.ribbonIconEl.removeClass('voice-writing-recording');
 			this.updateStatusBar('Idle');
+		}
+	}
+
+	async transcribeFile(file: File) {
+		const processingModal = new ProcessingModal(this.app);
+		processingModal.open();
+		this.updateStatusBar('Processing...');
+
+		try {
+			// Determine MIME type from file extension
+			const ext = file.name.split('.').pop()?.toLowerCase() || '';
+			const mimeType = AUDIO_MIME_TYPES[ext] || 'audio/mpeg';
+
+			// Create blob with correct MIME type
+			const arrayBuffer = await file.arrayBuffer();
+			const blob = new Blob([arrayBuffer], { type: mimeType });
+
+			// Get API key based on service provider
+			const apiKey = this.settings.serviceProvider === 'openai'
+				? this.settings.openaiApiKey
+				: this.settings.groqApiKey;
+
+			// Transcribe
+			const result = await this.transcriptionService.transcribe(
+				blob,
+				apiKey,
+				this.settings.language,
+				this.settings.serviceProvider
+			);
+
+			processingModal.close();
+			new Notice(SUCCESS_MESSAGES.TRANSCRIPTION_COMPLETE);
+			this.updateStatusBar('Idle');
+
+			// Show Template Selection Modal
+			new TemplateSelectionModal(
+				this.app,
+				this.settings.customTemplates,
+				async (selectedTemplate) => {
+					let finalText = result.text;
+
+					// Format if template selected (not null and not 'none')
+					if (selectedTemplate && selectedTemplate.id !== 'none') {
+						new Notice(TEMPLATE_MESSAGES.FORMATTING);
+						const apiKey = this.settings.serviceProvider === 'openai'
+							? this.settings.openaiApiKey
+							: this.settings.groqApiKey;
+
+						const formatResult = await this.formattingService.formatTranscription(
+							result.text,
+							selectedTemplate,
+							apiKey,
+							this.settings.serviceProvider
+						);
+
+						if (formatResult.success) {
+							finalText = formatResult.text;
+							new Notice(TEMPLATE_MESSAGES.FORMAT_COMPLETE);
+						} else {
+							new Notice(TEMPLATE_MESSAGES.FORMAT_FAILED);
+						}
+					}
+
+					// Insert into Editor
+					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+					if (activeView) {
+						const editor = activeView.editor;
+						const content = `**File: ${file.name}**\n\n${finalText}\n`;
+						editor.replaceSelection(content);
+					} else {
+						// No active editor - copy to clipboard
+						new Notice(SUCCESS_MESSAGES.COPIED_TO_CLIPBOARD);
+						navigator.clipboard.writeText(finalText);
+					}
+				}
+			).open();
+
+		} catch (error) {
+			processingModal.close();
+			console.error('Transcription error:', error);
+			this.updateStatusBar('Error');
+
+			// Handle specific API errors
+			const errMsg = (error as Error).message;
+			if (errMsg === 'API_UNAUTHORIZED') {
+				new Notice(ERROR_MESSAGES.API_UNAUTHORIZED, 5000);
+			} else if (errMsg === 'API_QUOTA_EXCEEDED') {
+				new Notice(ERROR_MESSAGES.API_QUOTA_EXCEEDED, 5000);
+			} else {
+				new Notice('Transcription failed. Please try again.');
+			}
 		}
 	}
 
@@ -228,35 +388,79 @@ class VoiceWritingSettingTab extends PluginSettingTab {
 					this.display(); // Refresh to show correct key field
 				}));
 
+		// OpenAI API Key
 		new Setting(containerEl)
-			.setName('API Key')
-			.setDesc(`Enter your ${this.plugin.settings.serviceProvider === 'openai' ? 'OpenAI' : 'Groq'} API Key`)
+			.setName('OpenAI API Key')
+			.setDesc('Enter your OpenAI API Key')
 			.addText(text => text
 				.setPlaceholder('sk-...')
-				.setValue(this.plugin.settings.apiKey)
+				.setValue(this.plugin.settings.openaiApiKey)
 				.onChange(async (value) => {
-					this.plugin.settings.apiKey = value;
+					this.plugin.settings.openaiApiKey = value;
 					await this.plugin.saveSettings();
 				}))
 			.addButton(button => button
-				.setButtonText('Test API Key')
+				.setButtonText('Test')
 				.setCta()
 				.onClick(async () => {
 					button.setButtonText('Testing...');
 					button.setDisabled(true);
 
 					const result = await this.plugin.transcriptionService.testApiKey(
-						this.plugin.settings.apiKey,
-						this.plugin.settings.serviceProvider
+						this.plugin.settings.openaiApiKey,
+						'openai'
 					);
 
 					new Notice(result.message, result.success ? 3000 : 5000);
 					if (result.details) {
-						console.log('API Test Details:', result.details);
+						console.log('OpenAI API Test Details:', result.details);
 					}
 
-					button.setButtonText('Test API Key');
+					button.setButtonText('Test');
 					button.setDisabled(false);
+				}));
+
+		// Groq API Key
+		new Setting(containerEl)
+			.setName('Groq API Key')
+			.setDesc('Enter your Groq API Key')
+			.addText(text => text
+				.setPlaceholder('gsk_...')
+				.setValue(this.plugin.settings.groqApiKey)
+				.onChange(async (value) => {
+					this.plugin.settings.groqApiKey = value;
+					await this.plugin.saveSettings();
+				}))
+			.addButton(button => button
+				.setButtonText('Test')
+				.setCta()
+				.onClick(async () => {
+					button.setButtonText('Testing...');
+					button.setDisabled(true);
+
+					const result = await this.plugin.transcriptionService.testApiKey(
+						this.plugin.settings.groqApiKey,
+						'groq'
+					);
+
+					new Notice(result.message, result.success ? 3000 : 5000);
+					if (result.details) {
+						console.log('Groq API Test Details:', result.details);
+					}
+
+					button.setButtonText('Test');
+					button.setDisabled(false);
+				}));
+
+		// Speaker Diarization
+		new Setting(containerEl)
+			.setName(DIARIZATION_NOTE.LABEL)
+			.setDesc(DIARIZATION_NOTE.INFO)
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.enableSpeakerDiarization)
+				.onChange(async (value) => {
+					this.plugin.settings.enableSpeakerDiarization = value;
+					await this.plugin.saveSettings();
 				}));
 				
 		new Setting(containerEl)
