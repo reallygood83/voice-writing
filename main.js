@@ -432,7 +432,7 @@ var TranscriptionService = class {
       };
     }
   }
-  async transcribe(audioBlob, apiKey, language, serviceProvider) {
+  async transcribe(audioBlob, apiKey, language, serviceProvider, fileName, mimeType) {
     if (!apiKey) {
       new import_obsidian.Notice(ERROR_MESSAGES.API_KEY_MISSING);
       throw new Error("API Key missing");
@@ -443,8 +443,10 @@ var TranscriptionService = class {
     }
     const arrayBuffer = await audioBlob.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
+    const actualFileName = fileName || "recording.webm";
+    const actualMimeType = mimeType || audioBlob.type || API_CONFIG.AUDIO_MIME_TYPE;
     const boundary = "----ObsidianVoiceWritingBoundary" + Date.now();
-    const body = await this.createFormData(buffer, "recording.webm", boundary, language, serviceProvider);
+    const body = await this.createFormData(buffer, actualFileName, actualMimeType, boundary, language, serviceProvider);
     const url = API_ENDPOINTS[serviceProvider];
     const params = {
       url,
@@ -522,14 +524,14 @@ var TranscriptionService = class {
       };
     }
   }
-  async createFormData(fileBuffer, fileName, boundary, language, provider) {
+  async createFormData(fileBuffer, fileName, mimeType, boundary, language, provider) {
     const parts = [];
     const model = MODELS[provider];
     parts.push(Buffer.from(`--${boundary}\r
 `));
     parts.push(Buffer.from(`Content-Disposition: form-data; name="file"; filename="${fileName}"\r
 `));
-    parts.push(Buffer.from(`Content-Type: ${API_CONFIG.AUDIO_MIME_TYPE}\r
+    parts.push(Buffer.from(`Content-Type: ${mimeType}\r
 \r
 `));
     parts.push(fileBuffer);
@@ -1062,7 +1064,11 @@ ${finalText}
         blob,
         apiKey,
         this.settings.language,
-        this.settings.serviceProvider
+        this.settings.serviceProvider,
+        file.name,
+        // Pass actual file name
+        mimeType
+        // Pass actual MIME type
       );
       processingModal.close();
       new import_obsidian4.Notice(SUCCESS_MESSAGES.TRANSCRIPTION_COMPLETE);

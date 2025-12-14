@@ -1,6 +1,6 @@
 {
   "name": "obsidian-voice-writing",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Voice Writing plugin for Obsidian",
   "main": "main.js",
   "scripts": {

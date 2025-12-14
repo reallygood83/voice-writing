@@ -97,7 +97,9 @@ export class TranscriptionService {
         audioBlob: Blob,
         apiKey: string,
         language: string,
-        serviceProvider: ServiceProvider
+        serviceProvider: ServiceProvider,
+        fileName?: string,  // Optional: for uploaded files
+        mimeType?: string   // Optional: for uploaded files
     ): Promise<TranscriptionResult> {
         // Validate API key
         if (!apiKey) {
@@ -114,9 +116,13 @@ export class TranscriptionService {
         const arrayBuffer = await audioBlob.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
 
+        // Use provided filename/mimeType or defaults for recordings
+        const actualFileName = fileName || 'recording.webm';
+        const actualMimeType = mimeType || audioBlob.type || API_CONFIG.AUDIO_MIME_TYPE;
+
         // Boundary for multipart/form-data
         const boundary = '----ObsidianVoiceWritingBoundary' + Date.now();
-        const body = await this.createFormData(buffer, 'recording.webm', boundary, language, serviceProvider);
+        const body = await this.createFormData(buffer, actualFileName, actualMimeType, boundary, language, serviceProvider);
 
         const url = API_ENDPOINTS[serviceProvider];
 
@@ -212,6 +218,7 @@ export class TranscriptionService {
     private async createFormData(
         fileBuffer: Buffer,
         fileName: string,
+        mimeType: string,
         boundary: string,
         language: string,
         provider: ServiceProvider
@@ -219,10 +226,10 @@ export class TranscriptionService {
         const parts: Buffer[] = [];
         const model = MODELS[provider];
 
-        // File part
+        // File part - use provided mimeType
         parts.push(Buffer.from(`--${boundary}\r\n`));
         parts.push(Buffer.from(`Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n`));
-        parts.push(Buffer.from(`Content-Type: ${API_CONFIG.AUDIO_MIME_TYPE}\r\n\r\n`));
+        parts.push(Buffer.from(`Content-Type: ${mimeType}\r\n\r\n`));
         parts.push(fileBuffer);
         parts.push(Buffer.from(`\r\n`));
 

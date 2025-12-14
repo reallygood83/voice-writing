@@ -267,12 +267,14 @@ export default class VoiceWritingPlugin extends Plugin {
 				? this.settings.openaiApiKey
 				: this.settings.groqApiKey;
 
-			// Transcribe
+			// Transcribe with actual file name and MIME type
 			const result = await this.transcriptionService.transcribe(
 				blob,
 				apiKey,
 				this.settings.language,
-				this.settings.serviceProvider
+				this.settings.serviceProvider,
+				file.name,  // Pass actual file name
+				mimeType    // Pass actual MIME type
 			);
 
 			processingModal.close();
