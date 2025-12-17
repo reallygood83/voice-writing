@@ -878,7 +878,9 @@ var DEFAULT_SETTINGS = {
   language: "auto",
   serviceProvider: "openai",
   enableSpeakerDiarization: false,
-  customTemplates: []
+  customTemplates: [],
+  saveAudioFiles: false,
+  audioSaveFolder: ""
 };
 var VoiceWritingPlugin = class extends import_obsidian4.Plugin {
   constructor() {
@@ -977,9 +979,32 @@ var VoiceWritingPlugin = class extends import_obsidian4.Plugin {
       this.updateStatusBar("Processing...");
       const processingModal = new ProcessingModal(this.app);
       processingModal.open();
-      const fileName = `recording-${Date.now()}.webm`;
-      const arrayBuffer = await blob.arrayBuffer();
-      await this.app.vault.createBinary(fileName, arrayBuffer);
+      let filePath = "";
+      let audioFileSaved = false;
+      if (this.settings.saveAudioFiles) {
+        const fileName = `recording-${Date.now()}.webm`;
+        const arrayBuffer = await blob.arrayBuffer();
+        filePath = fileName;
+        const saveFolder = this.settings.audioSaveFolder.trim();
+        if (saveFolder) {
+          const folderExists = this.app.vault.getAbstractFileByPath(saveFolder);
+          if (!folderExists) {
+            try {
+              await this.app.vault.createFolder(saveFolder);
+            } catch (e) {
+              console.error("Failed to create folder:", saveFolder);
+            }
+          }
+          filePath = `${saveFolder}/${fileName}`;
+        }
+        try {
+          await this.app.vault.createBinary(filePath, arrayBuffer);
+          audioFileSaved = true;
+        } catch (saveError) {
+          console.error("Failed to save audio file:", saveError);
+          new import_obsidian4.Notice("Failed to save audio file. Check vault permissions.");
+        }
+      }
       try {
         const apiKey = this.settings.serviceProvider === "openai" ? this.settings.openaiApiKey : this.settings.groqApiKey;
         const result = await this.transcriptionService.transcribe(
@@ -1015,9 +1040,10 @@ var VoiceWritingPlugin = class extends import_obsidian4.Plugin {
             const activeView = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
             if (activeView) {
               const editor = activeView.editor;
-              const content = `![[${fileName}]]
+              const content = audioFileSaved ? `![[${filePath}]]
 
 ${finalText}
+` : `${finalText}
 `;
               editor.replaceSelection(content);
             } else {
@@ -1038,10 +1064,12 @@ ${finalText}
         } else {
           new import_obsidian4.Notice("Transcription failed. Audio saved locally.");
         }
-        const activeView = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
-        if (activeView) {
-          activeView.editor.replaceSelection(`![[${fileName}]]
+        if (audioFileSaved) {
+          const activeView = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
+          if (activeView) {
+            activeView.editor.replaceSelection(`![[${filePath}]]
 `);
+          }
         }
       }
     } catch (error) {
@@ -1205,6 +1233,18 @@ var VoiceWritingSettingTab = class extends import_obsidian4.PluginSettingTab {
       button.setButtonText("Test");
       button.setDisabled(false);
     }));
+    containerEl.createEl("h3", { text: "Storage" });
+    new import_obsidian4.Setting(containerEl).setName("Save Audio Recordings").setDesc("Save recorded audio files to vault. If disabled, only transcribed text will be inserted.").addToggle((toggle) => toggle.setValue(this.plugin.settings.saveAudioFiles).onChange(async (value) => {
+      this.plugin.settings.saveAudioFiles = value;
+      await this.plugin.saveSettings();
+      this.display();
+    }));
+    if (this.plugin.settings.saveAudioFiles) {
+      new import_obsidian4.Setting(containerEl).setName("Audio Save Folder").setDesc('Folder to save recorded audio files. Leave empty for vault root. Example: "Recordings" or "Assets/Audio"').addText((text) => text.setPlaceholder("Recordings").setValue(this.plugin.settings.audioSaveFolder).onChange(async (value) => {
+        this.plugin.settings.audioSaveFolder = value;
+        await this.plugin.saveSettings();
+      }));
+    }
     containerEl.createEl("h3", { text: "Transcription Options" });
     new import_obsidian4.Setting(containerEl).setName(DIARIZATION_NOTE.LABEL).setDesc(DIARIZATION_NOTE.INFO).addToggle((toggle) => toggle.setValue(this.plugin.settings.enableSpeakerDiarization).onChange(async (value) => {
       this.plugin.settings.enableSpeakerDiarization = value;

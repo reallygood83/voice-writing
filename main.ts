@@ -21,6 +21,8 @@ interface VoiceWritingSettings {
 	serviceProvider: ServiceProvider;
 	enableSpeakerDiarization: boolean;
 	customTemplates: FormattingTemplate[];
+	saveAudioFiles: boolean;
+	audioSaveFolder: string;
 }
 
 const DEFAULT_SETTINGS: VoiceWritingSettings = {
@@ -29,7 +31,9 @@ const DEFAULT_SETTINGS: VoiceWritingSettings = {
 	language: 'auto',
 	serviceProvider: 'openai',
 	enableSpeakerDiarization: false,
-	customTemplates: []
+	customTemplates: [],
+	saveAudioFiles: false,
+	audioSaveFolder: ''
 }
 
 export default class VoiceWritingPlugin extends Plugin {
@@ -155,10 +159,38 @@ export default class VoiceWritingPlugin extends Plugin {
 			const processingModal = new ProcessingModal(this.app);
 			processingModal.open();
 
-			// 1. Save Audio File
-			const fileName = `recording-${Date.now()}.webm`;
-			const arrayBuffer = await blob.arrayBuffer();
-			await this.app.vault.createBinary(fileName, arrayBuffer);
+			// 1. Save Audio File (if enabled)
+			let filePath = '';
+			let audioFileSaved = false;
+
+			if (this.settings.saveAudioFiles) {
+				const fileName = `recording-${Date.now()}.webm`;
+				const arrayBuffer = await blob.arrayBuffer();
+
+				// Use user-configured folder or vault root
+				filePath = fileName;
+				const saveFolder = this.settings.audioSaveFolder.trim();
+				if (saveFolder) {
+					// Ensure folder exists
+					const folderExists = this.app.vault.getAbstractFileByPath(saveFolder);
+					if (!folderExists) {
+						try {
+							await this.app.vault.createFolder(saveFolder);
+						} catch (e) {
+							console.error('Failed to create folder:', saveFolder);
+						}
+					}
+					filePath = `${saveFolder}/${fileName}`;
+				}
+
+				try {
+					await this.app.vault.createBinary(filePath, arrayBuffer);
+					audioFileSaved = true;
+				} catch (saveError) {
+					console.error('Failed to save audio file:', saveError);
+					new Notice('Failed to save audio file. Check vault permissions.');
+				}
+			}
 			
 			// 2. Transcribe
 			try {
@@ -209,7 +241,10 @@ export default class VoiceWritingPlugin extends Plugin {
 						const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 						if (activeView) {
 							const editor = activeView.editor;
-							const content = `![[${fileName}]]\n\n${finalText}\n`;
+							// Only include audio link if file was saved successfully
+							const content = audioFileSaved
+								? `![[${filePath}]]\n\n${finalText}\n`
+								: `${finalText}\n`;
 							editor.replaceSelection(content);
 						} else {
 							// No active editor - copy to clipboard
@@ -234,10 +269,12 @@ export default class VoiceWritingPlugin extends Plugin {
 					new Notice('Transcription failed. Audio saved locally.');
 				}
 
-				// Still insert the audio link
-				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (activeView) {
-					activeView.editor.replaceSelection(`![[${fileName}]]\n`);
+				// Still insert the audio link if file was saved
+				if (audioFileSaved) {
+					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+					if (activeView) {
+						activeView.editor.replaceSelection(`![[${filePath}]]\n`);
+					}
 				}
 			}
 
@@ -477,6 +514,32 @@ class VoiceWritingSettingTab extends PluginSettingTab {
 					button.setButtonText('Test');
 					button.setDisabled(false);
 				}));
+
+		// --- Storage Settings Section ---
+		containerEl.createEl('h3', {text: 'Storage'});
+		new Setting(containerEl)
+			.setName('Save Audio Recordings')
+			.setDesc('Save recorded audio files to vault. If disabled, only transcribed text will be inserted.')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.saveAudioFiles)
+				.onChange(async (value) => {
+					this.plugin.settings.saveAudioFiles = value;
+					await this.plugin.saveSettings();
+					this.display(); // Refresh to show/hide folder setting
+				}));
+
+		if (this.plugin.settings.saveAudioFiles) {
+			new Setting(containerEl)
+				.setName('Audio Save Folder')
+				.setDesc('Folder to save recorded audio files. Leave empty for vault root. Example: "Recordings" or "Assets/Audio"')
+				.addText(text => text
+					.setPlaceholder('Recordings')
+					.setValue(this.plugin.settings.audioSaveFolder)
+					.onChange(async (value) => {
+						this.plugin.settings.audioSaveFolder = value;
+						await this.plugin.saveSettings();
+					}));
+		}
 
 		// --- Other Settings Section ---
 		containerEl.createEl('h3', {text: 'Transcription Options'});
